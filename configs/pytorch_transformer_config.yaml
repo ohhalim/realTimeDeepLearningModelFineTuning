@@ -1,0 +1,38 @@
+# PyTorch Music Transformer 학습 설정
+
+# 모델 아키텍처
+model:
+  vocab_size: 512  # MIDI 이벤트 어휘 크기
+  d_model: 512     # 모델 차원
+  num_heads: 8     # Attention head 수
+  num_layers: 6    # Transformer 레이어 수
+  d_ff: 2048       # Feed-forward 차원
+  dropout: 0.1     # Dropout 비율
+
+# 데이터 설정
+data:
+  midi_dir: "data/raw_midi"  # MIDI 파일 디렉토리
+  max_length: 2048           # 최대 시퀀스 길이
+  train_split: 0.9           # 학습/검증 분할 비율
+  augment: true              # 데이터 증강 (transpose)
+
+# 학습 설정
+training:
+  batch_size: 4              # 배치 크기 (GPU 메모리에 따라 조정)
+  epochs: 100                # 학습 에폭 수
+  learning_rate: 1.0e-4      # 초기 학습률
+  min_lr: 1.0e-6             # 최소 학습률 (scheduler)
+  weight_decay: 0.01         # Weight decay
+  num_workers: 4             # DataLoader 워커 수
+  save_every: 5              # 체크포인트 저장 간격 (에폭)
+  output_dir: "models/finetuned/pytorch_transformer"
+
+# 생성 설정 (기본값)
+generation:
+  temperature: 1.0   # 샘플링 temperature
+  top_k: 40          # Top-k 샘플링
+  top_p: 0.9         # Nucleus 샘플링
+  max_length: 1024   # 최대 생성 길이
+
+# 시드 (재현성)
+seed: 42

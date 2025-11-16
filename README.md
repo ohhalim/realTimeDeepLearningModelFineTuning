@@ -2,29 +2,69 @@
 
 Brad Mehldau 스타일의 재즈 피아노를 생성하는 딥러닝 모델 파인튜닝 프로젝트
 
-## 🎹 세 가지 접근 방식
+## 🎹 네 가지 접근 방식
 
-### 1. QLoRA Fine-tuning (PyTorch) ⭐ Phase 1 (현재)
+### 1. PyTorch Music Transformer 🔥 (NEW!)
+**순수 PyTorch로 처음부터 구현**
+- 완전한 코드 제어 및 커스터마이징
+- Music Transformer 아키텍처
+- 8-12GB GPU
+- 최고의 학습 경험
+- **브랜치**: `pytorch-music-transformer-finetuning`
+
+### 2. QLoRA Fine-tuning (PyTorch) ⭐
 **빠른 실험 및 학습**
-- 메모리 효율적 (8GB GPU)
-- PyTorch 생태계
+- 메모리 효율적 (4GB GPU)
+- GPT-2 기반
 - 빠른 프로토타이핑
 
-### 2. Magenta RealTime (JAX) 🚀 Phase 2 (미래)
+### 3. Magenta RealTime (JAX) 🚀 Phase 2 (미래)
 **진짜 실시간 음악 생성**
 - 실시간 스트리밍 (RTF ≥ 1×)
 - Text/Audio prompts
 - Live audio injection
 - Colab TPU (무료) 또는 40GB GPU
 
-### 3. Magenta Music Transformer (TensorFlow)
+### 4. Magenta Music Transformer (TensorFlow)
 **전통적 접근**
 - 높은 품질
 - 오프라인 생성
 
 ## 빠른 시작
 
-### 옵션 A: QLoRA (추천 ⭐)
+### 옵션 A: PyTorch Music Transformer (완전한 학습 🔥)
+
+**순수 PyTorch로 Music Transformer 처음부터 학습**
+
+```bash
+# 브랜치 체크아웃
+git checkout pytorch-music-transformer-finetuning
+
+# 환경 설정
+python3 -m venv pytorch-env
+source pytorch-env/bin/activate
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install -r requirements-pytorch.txt
+
+# MIDI 데이터 준비
+python scripts/generate_sample_midi.py --count 30
+
+# 학습 시작 (8-25시간)
+python scripts/train_pytorch_transformer.py \
+  --config configs/pytorch_transformer_config.yaml
+
+# 음악 생성
+python scripts/generate_pytorch_transformer.py \
+  --checkpoint models/finetuned/pytorch_transformer/best_model.pt \
+  --output output/generated.mid \
+  --num_samples 5
+```
+
+**상세 가이드**: [PYTORCH_TRANSFORMER_GUIDE.md](./PYTORCH_TRANSFORMER_GUIDE.md) | [QUICKSTART_PYTORCH.md](./QUICKSTART_PYTORCH.md)
+
+---
+
+### 옵션 B: QLoRA (빠른 프로토타입 ⭐)
 
 메모리 효율적이고 빠른 학습을 원한다면 QLoRA를 사용하세요.
 
