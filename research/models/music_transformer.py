@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from typing import Optional, Tuple
 import math
 
-from hierarchical_lora import HierarchicalLoRAController
+from .hierarchical_lora import HierarchicalLoRAController
 
 
 class RelativePositionEmbedding(nn.Module):

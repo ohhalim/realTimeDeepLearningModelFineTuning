@@ -26,11 +26,16 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 
-# Add research directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent / 'models'))
-
-from music_transformer import MusicTransformerWithLoRA
-from style_encoder import StyleContrastiveModel
+# Import models from parent package
+try:
+    from ..models.music_transformer import MusicTransformerWithLoRA
+    from ..models.style_encoder import StyleContrastiveModel
+except ImportError:
+    # Fallback for direct script execution
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from models.music_transformer import MusicTransformerWithLoRA
+    from models.style_encoder import StyleContrastiveModel
 
 
 class MultiTaskLoss(nn.Module):
