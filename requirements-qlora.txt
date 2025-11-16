@@ -1,0 +1,41 @@
+# QLoRA Fine-tuning Requirements
+
+# Deep Learning Framework (PyTorch)
+torch==2.1.0
+torchvision==0.16.0
+torchaudio==2.1.0
+
+# HuggingFace Transformers
+transformers==4.36.0
+accelerate==0.25.0
+datasets==2.15.0
+
+# PEFT & QLoRA
+peft==0.7.1
+bitsandbytes==0.41.3
+
+# MIDI Processing
+pretty-midi==0.2.10
+mido==1.2.10
+music21==9.1.0
+
+# Data Processing
+numpy==1.24.0
+pandas==2.1.0
+scikit-learn==1.3.0
+
+# Visualization
+matplotlib==3.8.0
+seaborn==0.13.0
+
+# Utilities
+tqdm==4.66.0
+pyyaml==6.0.1
+wandb==0.16.0  # For experiment tracking
+
+# Monitoring
+tensorboard==2.15.0
+
+# Development
+ipykernel==6.27.0
+jupyter==1.0.0

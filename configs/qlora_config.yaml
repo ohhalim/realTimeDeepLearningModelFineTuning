@@ -1,0 +1,56 @@
+# QLoRA Fine-tuning Configuration for Brad Mehldau Style Jazz Piano
+
+# Model Settings
+model_name: "gpt2"  # Base model (gpt2, gpt2-medium, gpt2-large)
+# Alternative: "EleutherAI/gpt-neo-125M" for music-specific tasks
+
+# Data Settings
+midi_dir: "data/raw_midi"
+max_length: 1024  # Maximum sequence length (tokens)
+
+# Output Settings
+output_dir: "models/finetuned/qlora_brad_mehldau"
+
+# QLoRA Settings
+qlora:
+  lora_r: 16  # LoRA rank (낮을수록 메모리 효율적, 8-64 권장)
+  lora_alpha: 32  # LoRA scaling parameter (일반적으로 r의 2배)
+  lora_dropout: 0.05  # Dropout for LoRA layers
+  target_modules:  # GPT-2 attention modules
+    - "c_attn"  # Attention projection
+    - "c_proj"  # Output projection
+
+# Training Hyperparameters
+epochs: 100  # 작은 데이터셋이므로 많은 에폭
+batch_size: 4  # Per-device batch size
+gradient_accumulation_steps: 8  # Effective batch = 4 * 8 = 32
+learning_rate: 2.0e-4  # QLoRA 권장 학습률
+warmup_steps: 100
+
+# Optimization
+optim: "paged_adamw_8bit"  # 8-bit optimizer for memory efficiency
+weight_decay: 0.01
+max_grad_norm: 1.0
+
+# Logging & Checkpointing
+logging_steps: 10
+save_steps: 200
+eval_steps: 200
+save_total_limit: 3  # Keep only 3 best checkpoints
+
+# Evaluation
+evaluation_strategy: "steps"
+load_best_model_at_end: true
+metric_for_best_model: "eval_loss"
+
+# Mixed Precision
+fp16: true  # Use FP16 for faster training
+
+# Reproducibility
+seed: 42
+
+# WandB (Optional - comment out if not using)
+# wandb:
+#   project: "brad-mehldau-qlora"
+#   entity: "your-username"
+#   name: "qlora-gpt2-experiment-1"
