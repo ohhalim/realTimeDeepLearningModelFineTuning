@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+magenta-env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Data
+data/raw_midi/*.mid
+data/raw_midi/*.midi
+data/processed/
+data/tfrecord/
+
+# Models
+models/pretrained/
+models/finetuned/
+
+# Output
+output/
+*.mid
+*.midi
+
+# TensorFlow/TensorBoard
+*.ckpt
+*.ckpt.*
+checkpoint
+events.out.tfevents.*
+.tensorboard/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
