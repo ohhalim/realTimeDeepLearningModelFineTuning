@@ -1,0 +1,161 @@
+# JazzFormer-RT Model Configuration
+
+model_name: "JazzFormer-RT"
+version: "1.0.0"
+
+# Architecture Configuration
+architecture:
+  # Transformer Settings
+  d_model: 512                    # Model dimension
+  n_heads: 8                      # Number of attention heads
+  n_layers: 6                     # Number of transformer layers
+  d_ff: 2048                      # Feed-forward dimension
+  dropout: 0.1                    # Dropout rate
+
+  # Real-time Optimization
+  streaming:
+    enabled: true
+    window_size: 512              # Local attention window
+    cache_size: 2048              # KV cache size
+    chunk_size: 128               # Processing chunk size
+
+  # Jazz-specific Components
+  jazz_attention:
+    chord_aware: true
+    use_harmonic_bias: true
+    syncopation_encoding: true
+    swing_ratio_adaptive: true
+
+  # Style Module
+  style_embedding:
+    enabled: true
+    embedding_dim: 128
+    num_artists: 100              # Pre-allocate for multiple artists
+    artist_specific: "brad_mehldau"
+
+# Input/Output Configuration
+io:
+  vocab_size: 388                 # MIDI pitch + velocity + time
+  max_sequence_length: 2048
+  time_resolution: 16             # 16th notes
+  pitch_range: [21, 108]          # Piano range (A0-C8)
+  velocity_bins: 32
+
+# Training Configuration
+training:
+  # Pre-training
+  pretrain:
+    batch_size: 32
+    learning_rate: 0.0001
+    warmup_steps: 4000
+    max_steps: 100000
+    gradient_clip: 1.0
+
+    # Loss weights
+    reconstruction_weight: 1.0
+    chord_prediction_weight: 0.5
+    rhythm_consistency_weight: 0.3
+
+  # Fine-tuning
+  finetune:
+    batch_size: 16
+    learning_rate: 0.00001         # Lower for fine-tuning
+    warmup_steps: 1000
+    max_steps: 20000
+
+    # Style-specific losses
+    style_transfer_weight: 1.0
+    harmonic_consistency_weight: 0.7
+    rhythmic_signature_weight: 0.5
+
+  # Optimization
+  optimizer: "AdamW"
+  weight_decay: 0.01
+  lr_scheduler: "cosine"
+
+  # Regularization
+  label_smoothing: 0.1
+  mixup_alpha: 0.2
+
+# Data Configuration
+data:
+  # Pre-training data
+  pretrain_dataset:
+    path: "data/jazz_corpus"
+    min_duration: 30              # seconds
+    augmentation:
+      transpose: [-5, 5]          # semitones
+      tempo_shift: [0.9, 1.1]
+      time_masking: 0.1
+
+  # Fine-tuning data
+  finetune_dataset:
+    path: "data/brad_mehldau"
+    min_duration: 60
+    augmentation:
+      transpose: [-3, 3]          # Less aggressive
+      tempo_shift: [0.95, 1.05]
+
+  # Split ratios
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+
+# Evaluation Configuration
+evaluation:
+  metrics:
+    # Objective
+    - perplexity
+    - chord_accuracy
+    - rhythmic_consistency
+    - latency
+
+    # Subjective (requires user study)
+    - style_similarity
+    - musical_quality
+    - improvisational_creativity
+
+  # Real-time performance
+  latency_target: 50              # milliseconds
+  throughput_target: 20           # notes/second
+
+# Inference Configuration
+inference:
+  sampling:
+    temperature: 1.0
+    top_k: 40
+    top_p: 0.9
+    repetition_penalty: 1.2
+
+  beam_search:
+    beam_size: 4
+    length_penalty: 1.0
+
+  real_time:
+    buffer_size: 256
+    latency_mode: "low"           # low, medium, high
+    max_latency_ms: 50
+
+# Experiment Tracking
+experiment:
+  wandb:
+    enabled: true
+    project: "jazzformer-rt"
+    entity: "your-username"
+
+  tensorboard:
+    enabled: true
+    log_dir: "research/experiments/runs"
+
+  checkpointing:
+    save_interval: 1000
+    keep_top_k: 5
+    metric: "val_loss"
+
+# Hardware Configuration
+hardware:
+  device: "cuda"                  # cuda, cpu, mps
+  mixed_precision: true           # fp16 training
+  gradient_accumulation: 4
+  num_workers: 4
+  pin_memory: true
