@@ -1,167 +1,168 @@
 #!/usr/bin/env python3
 """
-파인튜닝된 모델로 음악 생성 스크립트
+Generate music using trained JazzFormer-RT model
 
-사용법:
-    python scripts/generate.py --checkpoint models/finetuned/brad_mehldau/model.ckpt-10000
+Usage:
+    python scripts/generate.py --checkpoint path/to/model.pt --output_dir output/
 """
 
 import os
+import sys
 import argparse
-from datetime import datetime
-import glob
+import torch
+from pathlib import Path
+
+# Add project root to path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.models.jazzformer_rt import JazzFormerRT
+from src.data.dataset import MIDITokenizer
 
 
-# 설정
-OUTPUT_DIR = "output"
-DEFAULT_NUM_OUTPUTS = 5
-DEFAULT_TEMPERATURE = 1.0
-DEFAULT_NUM_STEPS = 2048
+def load_model(checkpoint_path: str, device: str = 'cuda') -> JazzFormerRT:
+    """Load trained model from checkpoint"""
+    print(f"Loading model from {checkpoint_path}...")
+
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+
+    # Get config from checkpoint
+    config = checkpoint.get('config', {})
+
+    # Create model
+    if config and 'architecture' in config:
+        arch_config = config['architecture']
+        model = JazzFormerRT(
+            vocab_size=config['io']['vocab_size'],
+            d_model=arch_config['d_model'],
+            n_heads=arch_config['n_heads'],
+            n_layers=arch_config['n_layers'],
+            d_ff=arch_config['d_ff'],
+            max_seq_len=config['io']['max_sequence_length'],
+            dropout=arch_config['dropout'],
+            num_artists=arch_config['style_embedding']['num_artists'],
+            style_embedding_dim=arch_config['style_embedding']['embedding_dim'],
+            window_size=arch_config['streaming']['window_size']
+        )
+    else:
+        # Default configuration
+        model = JazzFormerRT()
+
+    # Load weights
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model = model.to(device)
+    model.eval()
+
+    print(f"✓ Model loaded successfully!")
+    return model
 
 
-def find_latest_checkpoint(checkpoint_dir):
-    """
-    가장 최근 체크포인트 찾기
-    """
-    checkpoints = glob.glob(os.path.join(checkpoint_dir, "model.ckpt-*.index"))
-    if not checkpoints:
-        return None
+def generate_music(
+    model: JazzFormerRT,
+    num_outputs: int = 5,
+    output_dir: str = 'output',
+    temperature: float = 1.0,
+    max_length: int = 512,
+    artist_id: int = 0,
+    device: str = 'cuda'
+):
+    """Generate music samples"""
 
-    # 스텝 번호로 정렬
-    checkpoints = sorted(
-        checkpoints,
-        key=lambda x: int(x.split('-')[-1].replace('.index', ''))
-    )
+    os.makedirs(output_dir, exist_ok=True)
+    tokenizer = MIDITokenizer()
 
-    latest = checkpoints[-1].replace('.index', '')
-    return latest
+    print(f"\nGenerating {num_outputs} samples...")
+    print(f"Temperature: {temperature}")
+    print(f"Max length: {max_length}")
+    print(f"Artist ID: {artist_id}")
+    print(f"Output directory: {output_dir}\n")
 
+    for i in range(num_outputs):
+        # Create random prompt (start token)
+        prompt = torch.randint(0, model.vocab_size, (1, 32), device=device)
 
-def generate_music(checkpoint_path, num_outputs, temperature, num_steps,
-                   primer_midi=None):
-    """
-    음악 생성
+        # Generate
+        with torch.no_grad():
+            generated = model.generate(
+                prompt=prompt,
+                max_length=max_length,
+                temperature=temperature,
+                artist_id=artist_id
+            )
 
-    Args:
-        checkpoint_path: 모델 체크포인트 경로
-        num_outputs: 생성할 MIDI 파일 수
-        temperature: 샘플링 온도 (0.5~1.5)
-        num_steps: 생성할 스텝 수
-        primer_midi: 프라이머 MIDI 파일 (선택)
-    """
-    print("=" * 60)
-    print("Brad Mehldau 스타일 음악 생성")
-    print("=" * 60)
-    print(f"시작 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print()
+        # Convert to MIDI
+        output_path = os.path.join(output_dir, f'generated_{i+1}.mid')
+        tokenizer.decode_tokens(generated[0].cpu(), output_path)
 
-    print("설정:")
-    print(f"  체크포인트: {checkpoint_path}")
-    print(f"  생성 개수: {num_outputs}")
-    print(f"  Temperature: {temperature}")
-    print(f"  스텝 수: {num_steps}")
-    if primer_midi:
-        print(f"  프라이머: {primer_midi}")
-    print()
+        print(f"✓ Generated sample {i+1}/{num_outputs}: {output_path}")
 
-    # 출력 디렉토리 생성
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_subdir = os.path.join(OUTPUT_DIR, f"generation_{timestamp}")
-    os.makedirs(output_subdir, exist_ok=True)
-
-    # Magenta Music Transformer 생성 명령
-    primer_flag = f"--primer_midi={primer_midi}" if primer_midi else ""
-
-    cmd = f"""
-    music_transformer_generate \\
-      --config='unconditional' \\
-      --checkpoint_file={checkpoint_path} \\
-      --output_dir={output_subdir} \\
-      --num_outputs={num_outputs} \\
-      --temperature={temperature} \\
-      --num_steps={num_steps} \\
-      {primer_flag}
-    """
-
-    print("실행 명령:")
-    print(cmd.strip())
-    print()
-
-    print("=" * 60)
-    print("⚠️  주의: 실제 생성은 Magenta CLI를 직접 실행해야 합니다")
-    print("=" * 60)
-    print()
-    print("다음 명령을 터미널에서 실행하세요:")
-    print()
-    print(cmd.strip())
-    print()
-    print(f"생성된 MIDI 파일은 {output_subdir}/ 에 저장됩니다.")
-    print()
+    print(f"\n✓ All samples generated successfully!")
+    print(f"Output directory: {output_dir}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="파인튜닝된 모델로 Brad Mehldau 스타일 음악 생성"
+        description="Generate music with JazzFormer-RT"
     )
     parser.add_argument(
-        "--checkpoint",
+        '--checkpoint',
         type=str,
-        help="모델 체크포인트 경로 (미지정 시 최신 체크포인트 자동 선택)"
+        required=True,
+        help='Path to model checkpoint'
     )
     parser.add_argument(
-        "--checkpoint_dir",
+        '--output_dir',
         type=str,
-        default="models/finetuned/brad_mehldau",
-        help="체크포인트 디렉토리 (기본값: models/finetuned/brad_mehldau)"
+        default='output/generated',
+        help='Output directory for generated MIDI files'
     )
     parser.add_argument(
-        "--num_outputs",
+        '--num_outputs',
         type=int,
-        default=DEFAULT_NUM_OUTPUTS,
-        help=f"생성할 MIDI 파일 수 (기본값: {DEFAULT_NUM_OUTPUTS})"
+        default=5,
+        help='Number of samples to generate'
     )
     parser.add_argument(
-        "--temperature",
+        '--temperature',
         type=float,
-        default=DEFAULT_TEMPERATURE,
-        help=f"샘플링 온도 (기본값: {DEFAULT_TEMPERATURE})"
+        default=1.0,
+        help='Sampling temperature (0.5-1.5)'
     )
     parser.add_argument(
-        "--num_steps",
+        '--max_length',
         type=int,
-        default=DEFAULT_NUM_STEPS,
-        help=f"생성할 스텝 수 (기본값: {DEFAULT_NUM_STEPS})"
+        default=512,
+        help='Maximum sequence length'
     )
     parser.add_argument(
-        "--primer",
+        '--artist_id',
+        type=int,
+        default=0,
+        help='Artist ID for style (0=Brad Mehldau)'
+    )
+    parser.add_argument(
+        '--device',
         type=str,
-        help="프라이머 MIDI 파일 경로 (선택)"
+        default='cuda' if torch.cuda.is_available() else 'cpu',
+        help='Device to use (cuda/cpu)'
     )
 
     args = parser.parse_args()
 
-    # 체크포인트 결정
-    checkpoint_path = args.checkpoint
-    if not checkpoint_path:
-        print(f"체크포인트 자동 선택 중... ({args.checkpoint_dir})")
-        checkpoint_path = find_latest_checkpoint(args.checkpoint_dir)
+    # Load model
+    model = load_model(args.checkpoint, args.device)
 
-        if not checkpoint_path:
-            print(f"❌ 체크포인트를 찾을 수 없습니다: {args.checkpoint_dir}")
-            print("   먼저 모델을 학습하세요: python scripts/train.py")
-            return
-
-        print(f"✓ 선택된 체크포인트: {checkpoint_path}\n")
-
-    # 음악 생성
+    # Generate music
     generate_music(
-        checkpoint_path=checkpoint_path,
+        model=model,
         num_outputs=args.num_outputs,
+        output_dir=args.output_dir,
         temperature=args.temperature,
-        num_steps=args.num_steps,
-        primer_midi=args.primer
+        max_length=args.max_length,
+        artist_id=args.artist_id,
+        device=args.device
     )
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

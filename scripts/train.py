@@ -1,170 +1,216 @@
 #!/usr/bin/env python3
 """
-Music Transformer 파인튜닝 스크립트
+Simple training script for JazzFormer-RT
 
-사용법:
-    python scripts/train.py
+Usage:
+    python scripts/train.py --data_dir data/brad_mehldau
 """
 
 import os
+import sys
 import argparse
-from datetime import datetime
+import yaml
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from pathlib import Path
+from tqdm import tqdm
+
+# Add project root to path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.models.jazzformer_rt import JazzFormerRT
+from src.data.dataset import create_dataloaders
 
 
-# 설정
-TFRECORD_DIR = "data/tfrecord"
-PRETRAINED_MODEL = "models/pretrained/unconditional_model_16.ckpt"
-OUTPUT_DIR = "models/finetuned/brad_mehldau"
+def train_epoch(model, train_loader, optimizer, criterion, device, epoch):
+    """Train for one epoch"""
+    model.train()
+    total_loss = 0
+    num_batches = 0
 
-# 하이퍼파라미터
-BATCH_SIZE = 4
-LEARNING_RATE = 0.0001
-NUM_TRAIN_STEPS = 10000
-STEPS_PER_CHECKPOINT = 500
-SEQUENCE_LENGTH = 2048
+    pbar = tqdm(train_loader, desc=f"Epoch {epoch}")
 
+    for tokens, targets, artist_ids in pbar:
+        tokens = tokens.to(device)
+        targets = targets.to(device)
+        artist_ids = artist_ids.to(device)
 
-def check_prerequisites():
-    """
-    학습 전 필수 조건 확인
-    """
-    print("=" * 60)
-    print("필수 조건 확인...")
-    print("=" * 60)
+        # Forward
+        logits = model(tokens, artist_ids)
 
-    issues = []
+        # Loss
+        loss = criterion(
+            logits.view(-1, logits.size(-1)),
+            targets.view(-1)
+        )
 
-    # 1. TFRecord 데이터 확인
-    train_data = os.path.join(TFRECORD_DIR, "train", "train.tfrecord")
-    if not os.path.exists(train_data):
-        issues.append(f"학습 데이터 없음: {train_data}")
-        issues.append("  → python scripts/preprocess.py 를 먼저 실행하세요")
-    else:
-        print(f"✓ 학습 데이터 존재: {train_data}")
+        # Backward
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
 
-    # 2. 사전학습 모델 확인
-    if not os.path.exists(PRETRAINED_MODEL):
-        print(f"⚠️  사전학습 모델 없음: {PRETRAINED_MODEL}")
-        print("   → 처음부터 학습합니다 (시간이 더 걸릴 수 있음)")
-    else:
-        print(f"✓ 사전학습 모델 존재: {PRETRAINED_MODEL}")
+        # Track
+        total_loss += loss.item()
+        num_batches += 1
 
-    # 3. GPU 확인
-    try:
-        import tensorflow as tf
-        gpus = tf.config.list_physical_devices('GPU')
-        if gpus:
-            print(f"✓ GPU 사용 가능: {len(gpus)}개")
-            for gpu in gpus:
-                print(f"  - {gpu.name}")
-        else:
-            print("⚠️  GPU 없음 (CPU로 학습 - 매우 느림)")
-    except Exception as e:
-        print(f"⚠️  TensorFlow GPU 확인 실패: {e}")
+        pbar.set_postfix({'loss': f'{loss.item():.4f}'})
 
-    print("=" * 60 + "\n")
-
-    if issues:
-        print("❌ 오류:")
-        for issue in issues:
-            print(f"  {issue}")
-        return False
-
-    return True
+    return total_loss / num_batches
 
 
-def train_music_transformer():
-    """
-    Music Transformer 파인튜닝 실행
+@torch.no_grad()
+def validate(model, val_loader, criterion, device):
+    """Validate the model"""
+    model.eval()
+    total_loss = 0
+    num_batches = 0
 
-    Note: 이 함수는 실제 Magenta CLI 명령을 사용합니다.
-    """
-    print("=" * 60)
-    print("Music Transformer 파인튜닝 시작")
-    print("=" * 60)
-    print(f"시작 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print()
+    for tokens, targets, artist_ids in tqdm(val_loader, desc="Validation"):
+        tokens = tokens.to(device)
+        targets = targets.to(device)
+        artist_ids = artist_ids.to(device)
 
-    print("하이퍼파라미터:")
-    print(f"  배치 크기: {BATCH_SIZE}")
-    print(f"  학습률: {LEARNING_RATE}")
-    print(f"  학습 스텝: {NUM_TRAIN_STEPS}")
-    print(f"  체크포인트 간격: {STEPS_PER_CHECKPOINT}")
-    print(f"  시퀀스 길이: {SEQUENCE_LENGTH}")
-    print()
+        logits = model(tokens, artist_ids)
+        loss = criterion(
+            logits.view(-1, logits.size(-1)),
+            targets.view(-1)
+        )
 
-    # 출력 디렉토리 생성
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+        total_loss += loss.item()
+        num_batches += 1
 
-    # Magenta Music Transformer 학습 명령
-    cmd = f"""
-    music_transformer_train \\
-      --config='unconditional' \\
-      --data_dir={TFRECORD_DIR}/train \\
-      --output_dir={OUTPUT_DIR} \\
-      --restore_checkpoint={PRETRAINED_MODEL} \\
-      --learning_rate={LEARNING_RATE} \\
-      --batch_size={BATCH_SIZE} \\
-      --num_train_steps={NUM_TRAIN_STEPS} \\
-      --steps_per_checkpoint={STEPS_PER_CHECKPOINT} \\
-      --sequence_length={SEQUENCE_LENGTH}
-    """
-
-    print("실행 명령:")
-    print(cmd)
-    print()
-
-    print("=" * 60)
-    print("⚠️  주의: 실제 학습은 Magenta CLI를 직접 실행해야 합니다")
-    print("=" * 60)
-    print()
-    print("다음 명령을 터미널에서 실행하세요:")
-    print()
-    print(cmd.strip())
-    print()
-    print("또는 TensorBoard로 학습 모니터링:")
-    print(f"  tensorboard --logdir={OUTPUT_DIR}")
-    print()
+    return total_loss / num_batches
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Brad Mehldau 스타일 Music Transformer 파인튜닝"
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=BATCH_SIZE,
-        help=f"배치 크기 (기본값: {BATCH_SIZE})"
-    )
-    parser.add_argument(
-        "--learning_rate",
-        type=float,
-        default=LEARNING_RATE,
-        help=f"학습률 (기본값: {LEARNING_RATE})"
-    )
-    parser.add_argument(
-        "--num_steps",
-        type=int,
-        default=NUM_TRAIN_STEPS,
-        help=f"학습 스텝 (기본값: {NUM_TRAIN_STEPS})"
-    )
+    parser = argparse.ArgumentParser(description="Train JazzFormer-RT")
+    parser.add_argument('--data_dir', type=str, required=True, help='Data directory')
+    parser.add_argument('--config', type=str, default='configs/model_config.yaml')
+    parser.add_argument('--output_dir', type=str, default='models/finetuned/brad_mehldau')
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--batch_size', type=int, default=4)
+    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
 
     args = parser.parse_args()
 
-    # 설정 업데이트
-    global BATCH_SIZE, LEARNING_RATE, NUM_TRAIN_STEPS
-    BATCH_SIZE = args.batch_size
-    LEARNING_RATE = args.learning_rate
-    NUM_TRAIN_STEPS = args.num_steps
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    # 필수 조건 확인
-    if not check_prerequisites():
+    # Load config
+    if os.path.exists(args.config):
+        with open(args.config, 'r') as f:
+            config = yaml.safe_load(f)
+    else:
+        config = None
+        print(f"Warning: Config file not found at {args.config}, using defaults")
+
+    # Create model
+    print("Creating JazzFormer-RT model...")
+    if config and 'architecture' in config:
+        arch = config['architecture']
+        model = JazzFormerRT(
+            vocab_size=config['io']['vocab_size'],
+            d_model=arch['d_model'],
+            n_heads=arch['n_heads'],
+            n_layers=arch['n_layers'],
+            d_ff=arch['d_ff'],
+            max_seq_len=config['io']['max_sequence_length'],
+            dropout=arch['dropout'],
+            num_artists=arch['style_embedding']['num_artists'],
+            style_embedding_dim=arch['style_embedding']['embedding_dim'],
+            window_size=arch['streaming']['window_size']
+        )
+    else:
+        model = JazzFormerRT()
+
+    model = model.to(args.device)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Total parameters: {total_params:,}")
+
+    # Create dataloaders
+    print(f"Loading data from {args.data_dir}...")
+    train_dir = os.path.join(args.data_dir, 'train')
+    val_dir = os.path.join(args.data_dir, 'val')
+
+    # Check if directories exist
+    if not os.path.exists(train_dir):
+        print(f"Error: Training directory not found: {train_dir}")
+        print(f"Please create the directory and add MIDI files")
         return
 
-    # 학습 실행
-    train_music_transformer()
+    if not os.path.exists(val_dir):
+        print(f"Warning: Validation directory not found: {val_dir}")
+        print(f"Using training data for validation")
+        val_dir = train_dir
+
+    train_loader, val_loader = create_dataloaders(
+        train_dir=train_dir,
+        val_dir=val_dir,
+        batch_size=args.batch_size,
+        max_length=2048,
+        artist_name='brad_mehldau',
+        num_workers=2
+    )
+
+    print(f"Train batches: {len(train_loader)}")
+    print(f"Val batches: {len(val_loader)}")
+
+    # Setup training
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+
+    best_val_loss = float('inf')
+
+    # Training loop
+    print(f"\nTraining for {args.epochs} epochs...")
+    for epoch in range(1, args.epochs + 1):
+        print(f"\n{'='*60}")
+        print(f"Epoch {epoch}/{args.epochs}")
+        print(f"{'='*60}")
+
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, args.device, epoch)
+        val_loss = validate(model, val_loader, criterion, args.device)
+        scheduler.step()
+
+        print(f"Train Loss: {train_loss:.4f}")
+        print(f"Val Loss: {val_loss:.4f}")
+        print(f"Val Perplexity: {torch.exp(torch.tensor(val_loss)):.2f}")
+
+        # Save checkpoint
+        is_best = val_loss < best_val_loss
+        if is_best:
+            best_val_loss = val_loss
+
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'train_loss': train_loss,
+            'val_loss': val_loss,
+            'config': config
+        }
+
+        checkpoint_path = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch}.pt')
+        torch.save(checkpoint, checkpoint_path)
+        print(f"Checkpoint saved: {checkpoint_path}")
+
+        if is_best:
+            best_path = os.path.join(args.output_dir, 'best.pt')
+            torch.save(checkpoint, best_path)
+            print(f"✓ New best model! Saved to {best_path}")
+
+    print(f"\n{'='*60}")
+    print("✓ Training complete!")
+    print(f"Best validation loss: {best_val_loss:.4f}")
+    print(f"Models saved to: {args.output_dir}")
+    print(f"{'='*60}")
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
