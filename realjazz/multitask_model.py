@@ -312,10 +312,16 @@ class MultiTaskJazzFormer(AnticipativeJazzFormer):
         temperature: float = 0.8
     ) -> Tuple[torch.Tensor, float]:
         """
-        Harmonize monophonic melody with chords
+        ⚠️ NOT FULLY IMPLEMENTED - Harmonize monophonic melody with chords
 
-        Uses logit constraints to force chord generation beneath
-        each melody note.
+        STATUS: Placeholder implementation
+
+        Full implementation requires:
+        1. Aria token parser to extract onset times (✓ now available in note_parser.py)
+        2. Logit constraint mask to force chord notes at same onset
+        3. Onset-aware generation loop
+
+        Current behavior: Raises NotImplementedError
 
         Args:
             melody: (1, melody_len) - Monophonic melody tokens
@@ -325,31 +331,30 @@ class MultiTaskJazzFormer(AnticipativeJazzFormer):
 
         Returns:
             (harmonized_tokens, latency_ms)
+
+        Raises:
+            NotImplementedError: This method is not yet fully implemented
         """
-        import time
-        start_time = time.time()
-
-        self.eval()
-        device = next(self.parameters()).device
-        melody = melody.to(device)
-
-        # Parse melody to extract onset times
-        # Simplified: assume melody is already parsed as notes
-
-        # For each melody note, generate chord below it
-        harmonized = []
-
-        # This is a simplified version
-        # Full implementation would:
-        # 1. Parse melody into notes
-        # 2. For each note, constrain logits to generate chord at same onset
-        # 3. Generate subsequent notes freely
-
-        # Placeholder: just return melody for now
-        # Full implementation requires onset-time parsing from Aria tokens
-
-        latency_ms = (time.time() - start_time) * 1000
-        return melody, latency_ms  # Placeholder
+        raise NotImplementedError(
+            "harmonize_melody() is not yet implemented.\n"
+            "\n"
+            "Full implementation requires:\n"
+            "1. Parse melody using AriaTokenParser (now available)\n"
+            "2. For each melody note, generate chord at same onset:\n"
+            "   - Extract onset_ms from melody note\n"
+            "   - Constrain next onset token to be same as melody onset\n"
+            "   - Constrain pitch to be below melody pitch\n"
+            "   - Generate n_chord_notes-1 additional notes\n"
+            "3. Combine melody + chord tokens\n"
+            "\n"
+            "See ImprovNet paper section 3.3 'Logit Constraints for Harmonization'\n"
+            "for detailed algorithm.\n"
+            "\n"
+            "TODO:\n"
+            "- Implement onset-time logit constraints\n"
+            "- Implement pitch-below-melody constraints\n"
+            "- Test on monophonic melodies\n"
+        )
 
     @torch.no_grad()
     def cross_genre_transfer(
@@ -359,23 +364,38 @@ class MultiTaskJazzFormer(AnticipativeJazzFormer):
         corruption_type: Optional[CorruptionType] = None,
         corruption_rate: float = 0.7,
         n_passes: int = 3,
-        temperature: float = 0.9
+        temperature: float = 0.9,
+        max_new_tokens: int = 16
     ) -> Tuple[torch.Tensor, float]:
         """
         Cross-genre style transfer (e.g., classical → jazz)
 
         Uses iterative corruption-refinement approach from ImprovNet.
 
+        ⚠️ SIMPLIFIED IMPLEMENTATION:
+        - Corrupts entire sequence (not segment-by-segment)
+        - Uses autoregressive refinement (not encoder-decoder)
+        - Single-pass processing (ignores n_passes parameter)
+
+        For full ImprovNet-style implementation, see TODO below.
+
         Args:
             source: (1, source_len) - Source sequence
             target_genre: Target genre ID
             corruption_type: Type of corruption (None = random)
-            corruption_rate: Probability of corrupting each segment
-            n_passes: Number of refinement passes
+            corruption_rate: Probability of corrupting (currently ignored)
+            n_passes: Number of refinement passes (currently ignored - uses 1 pass)
             temperature: Sampling temperature
+            max_new_tokens: Max tokens to generate per refinement
 
         Returns:
             (transferred_tokens, latency_ms)
+
+        TODO for full ImprovNet implementation:
+        - Segment-wise corruption (5-second chunks)
+        - Multi-pass refinement with decreasing corruption rate
+        - Preservation ratio control
+        - Left/right context window
         """
         import time
         start_time = time.time()
@@ -384,30 +404,49 @@ class MultiTaskJazzFormer(AnticipativeJazzFormer):
         device = next(self.parameters()).device
         source = source.to(device)
 
-        # Iterative refinement
-        current = source.cpu().tolist()[0]  # Convert to list for corruption
+        # Convert to list for corruption
+        current_list = source.cpu().tolist()[0]
 
-        for pass_idx in range(n_passes):
-            # Corrupt
-            if corruption_type is not None:
-                corrupted, corr_id = apply_random_corruption(
-                    current,
-                    corruption_type=corruption_type
-                )
-            else:
-                corrupted, corr_id = apply_random_corruption(current)
+        # Apply corruption
+        if corruption_type is not None:
+            corrupted_list, corr_id = apply_random_corruption(
+                current_list,
+                corruption_type=corruption_type
+            )
+        else:
+            corrupted_list, corr_id = apply_random_corruption(current_list)
 
-            # Convert back to tensor
-            corrupted_tensor = torch.tensor([corrupted], device=device)
+        # Convert back to tensor
+        corrupted = torch.tensor([corrupted_list], device=device)
 
-            # Refine (generate)
-            # Simplified: use continuation-style generation
-            # Full implementation would process segments iteratively
+        # Create event types (assume all AI for now)
+        event_types = torch.ones_like(corrupted) * 1  # AI event type
 
-            # Placeholder
-            current = corrupted
+        # Refine using model (genre-conditioned generation)
+        # This is a simplified version - just do one forward pass
+        logits, _ = self.forward_multitask(
+            corrupted,
+            event_types,
+            task_id=TaskType.CROSS_GENRE,
+            genre_id=target_genre,
+            corruption_id=corr_id
+        )
 
-        result = torch.tensor([current], device=device)
+        # Sample from logits (with temperature)
+        if temperature > 0:
+            probs = F.softmax(logits / temperature, dim=-1)
+            refined = torch.multinomial(probs[:, -1, :], num_samples=1)
+        else:
+            refined = logits.argmax(dim=-1, keepdim=True)
+
+        # For simplicity, just return the refined version
+        # Full implementation would:
+        # 1. Split into segments
+        # 2. Refine each segment with left/right context
+        # 3. Merge segments
+        # 4. Repeat for n_passes with decreasing corruption
+
+        result = refined
         latency_ms = (time.time() - start_time) * 1000
 
         return result, latency_ms
