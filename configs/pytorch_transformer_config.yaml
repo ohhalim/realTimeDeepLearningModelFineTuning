@@ -1,0 +1,38 @@
+# PyTorch Music Transformer Stage A 설정
+# 목적: lead role + conditioning 기반 MVP를 빠르게 안정화
+
+model:
+  vocab_size: 512
+  d_model: 384
+  num_heads: 8
+  num_layers: 6
+  d_ff: 1536
+  dropout: 0.1
+
+data:
+  midi_dir: "data/roles/lead"
+  use_role_dataset: true
+  role: "lead"
+  max_length: 512
+  max_conditioning_tokens: 256
+  train_split: 0.9
+  augment: true
+
+training:
+  batch_size: 8
+  epochs: 60
+  learning_rate: 1.0e-4
+  min_lr: 1.0e-6
+  weight_decay: 0.01
+  num_workers: 0
+  save_every: 5
+  output_dir: "models/finetuned/pytorch_transformer_roles"
+
+generation:
+  temperature: 0.9
+  top_k: 40
+  top_p: 0.9
+  max_length: 512
+  context_window: 256
+
+seed: 42

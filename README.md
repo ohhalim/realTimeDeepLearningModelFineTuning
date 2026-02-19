@@ -2,29 +2,132 @@
 
 Brad Mehldau 스타일의 재즈 피아노를 생성하는 딥러닝 모델 파인튜닝 프로젝트
 
-## 🎹 세 가지 접근 방식
+## 🎹 네 가지 접근 방식
 
-### 1. QLoRA Fine-tuning (PyTorch) ⭐ Phase 1 (현재)
+### 1. PyTorch Music Transformer 🔥 (NEW!)
+**순수 PyTorch로 처음부터 구현**
+- 완전한 코드 제어 및 커스터마이징
+- Music Transformer 아키텍처
+- 8-12GB GPU
+- 최고의 학습 경험
+- **브랜치**: `pytorch-music-transformer-finetuning`
+
+### 2. QLoRA Fine-tuning (PyTorch) ⭐
 **빠른 실험 및 학습**
-- 메모리 효율적 (8GB GPU)
-- PyTorch 생태계
+- 메모리 효율적 (4GB GPU)
+- GPT-2 기반
 - 빠른 프로토타이핑
 
-### 2. Magenta RealTime (JAX) 🚀 Phase 2 (미래)
+### 3. Magenta RealTime (JAX) 🚀 Phase 2 (미래)
 **진짜 실시간 음악 생성**
 - 실시간 스트리밍 (RTF ≥ 1×)
 - Text/Audio prompts
 - Live audio injection
 - Colab TPU (무료) 또는 40GB GPU
 
-### 3. Magenta Music Transformer (TensorFlow)
+### 4. Magenta Music Transformer (TensorFlow)
 **전통적 접근**
 - 높은 품질
 - 오프라인 생성
 
 ## 빠른 시작
 
-### 옵션 A: QLoRA (추천 ⭐)
+### 권장: Stage A (성공확률 우선, role-conditioned)
+
+```bash
+# 1) role 데이터셋 생성 (MVP: lead)
+python scripts/prepare_role_dataset.py \
+  --input_dir data/raw_midi \
+  --output_dir data/roles \
+  --role lead \
+  --conditioning_mode lower_register \
+  --transpose_all_keys
+
+# 2) lead 모델 학습
+python scripts/train_pytorch_transformer.py \
+  --config configs/roles/lead.yaml \
+  --use_role_dataset \
+  --role lead
+
+# 3) conditioning MIDI 기반 생성
+python scripts/generate_pytorch_transformer.py \
+  --checkpoint models/finetuned/pytorch_transformer_roles/lead/best_model.pt \
+  --inference_config configs/inference/realtime_stage_a.yaml \
+  --conditioning_midi data/roles/lead/00001_example_t+0/conditioning.mid \
+  --role lead \
+  --output output/lead_conditioned.mid
+
+# 4) 실시간 런타임 (MIDI 포트 확인 후 실행)
+python realtime/main.py --list_ports
+python realtime/main.py \
+  --inference_config configs/inference/realtime_stage_a.yaml \
+  --tempo_bpm 128
+```
+
+`accompaniment`, `call_response`는 Stage A 검증 후 `scripts/train_role_models.py`로 확장하세요.
+
+### Runpod 학습 (자동화 스크립트)
+
+클론 후 아래 한 줄로 Stage A 학습까지 시작할 수 있습니다.
+
+```bash
+bash scripts/runpod_train_stage_a.sh --mode all --role lead --overwrite
+```
+
+주요 옵션:
+
+```bash
+# 데이터셋만 생성
+bash scripts/runpod_train_stage_a.sh --mode prepare --role lead --overwrite
+
+# 학습만 시작 (백그라운드)
+bash scripts/runpod_train_stage_a.sh --mode train --role lead
+
+# 체크포인트 재개
+bash scripts/runpod_train_stage_a.sh \
+  --mode train \
+  --role lead \
+  --resume models/finetuned/pytorch_transformer_roles/lead/checkpoint_epoch_20.pt
+
+# foreground 실행
+bash scripts/runpod_train_stage_a.sh --mode train --role lead --no-nohup
+```
+
+---
+
+### 옵션 A: PyTorch Music Transformer (완전한 학습 🔥)
+
+**순수 PyTorch로 Music Transformer 처음부터 학습**
+
+```bash
+# 브랜치 체크아웃
+git checkout pytorch-music-transformer-finetuning
+
+# 환경 설정
+python3 -m venv pytorch-env
+source pytorch-env/bin/activate
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install -r requirements-pytorch.txt
+
+# MIDI 데이터 준비
+python scripts/generate_sample_midi.py --count 30
+
+# 학습 시작 (8-25시간)
+python scripts/train_pytorch_transformer.py \
+  --config configs/pytorch_transformer_config.yaml
+
+# 음악 생성
+python scripts/generate_pytorch_transformer.py \
+  --checkpoint models/finetuned/pytorch_transformer/best_model.pt \
+  --output output/generated.mid \
+  --num_samples 5
+```
+
+**상세 가이드**: [PYTORCH_TRANSFORMER_GUIDE.md](./PYTORCH_TRANSFORMER_GUIDE.md) | [QUICKSTART_PYTORCH.md](./QUICKSTART_PYTORCH.md)
+
+---
+
+### 옵션 B: QLoRA (빠른 프로토타입 ⭐)
 
 메모리 효율적이고 빠른 학습을 원한다면 QLoRA를 사용하세요.
 

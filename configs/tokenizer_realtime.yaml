@@ -1,0 +1,37 @@
+# Realtime tokenizer configuration (MVP-first)
+
+tokenizer:
+  base_vocab_size: 512
+  pad_token: 448
+  bos_token: 449
+  eos_token: 450
+  mask_token: 451
+
+realtime_conditioning:
+  enabled: true
+  merge_mode: "prefix"  # prefix | interleave
+  separator_token: "COND_SEP"
+
+  # Stage A minimal controls (high success probability)
+  minimal_control_tokens:
+    - "ROLE_LEAD"
+    - "CHORD_UNKNOWN"
+    - "TEMPO_SLOW"
+    - "TEMPO_MEDIUM"
+    - "TEMPO_FAST"
+
+  # Stage B expansion controls
+  extended_control_tokens:
+    - "ROLE_ACCOMPANIMENT"
+    - "ROLE_CALL_RESPONSE"
+    - "KEY_MAJOR"
+    - "KEY_MINOR"
+    - "BAR_POS"
+    - "BEAT_POS"
+    - "TRIGGER_REFRESH"
+
+runtime:
+  context_window_notes: 60
+  prompt_lookback_notes: 40
+  pre_generation_bars: 1
+  target_latency_ms: 120
