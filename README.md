@@ -32,6 +32,69 @@ Brad Mehldau 스타일의 재즈 피아노를 생성하는 딥러닝 모델 파�
 
 ## 빠른 시작
 
+### 권장: Stage A (성공확률 우선, role-conditioned)
+
+```bash
+# 1) role 데이터셋 생성 (MVP: lead)
+python scripts/prepare_role_dataset.py \
+  --input_dir data/raw_midi \
+  --output_dir data/roles \
+  --role lead \
+  --conditioning_mode lower_register \
+  --transpose_all_keys
+
+# 2) lead 모델 학습
+python scripts/train_pytorch_transformer.py \
+  --config configs/roles/lead.yaml \
+  --use_role_dataset \
+  --role lead
+
+# 3) conditioning MIDI 기반 생성
+python scripts/generate_pytorch_transformer.py \
+  --checkpoint models/finetuned/pytorch_transformer_roles/lead/best_model.pt \
+  --inference_config configs/inference/realtime_stage_a.yaml \
+  --conditioning_midi data/roles/lead/00001_example_t+0/conditioning.mid \
+  --role lead \
+  --output output/lead_conditioned.mid
+
+# 4) 실시간 런타임 (MIDI 포트 확인 후 실행)
+python realtime/main.py --list_ports
+python realtime/main.py \
+  --inference_config configs/inference/realtime_stage_a.yaml \
+  --tempo_bpm 128
+```
+
+`accompaniment`, `call_response`는 Stage A 검증 후 `scripts/train_role_models.py`로 확장하세요.
+
+### Runpod 학습 (자동화 스크립트)
+
+클론 후 아래 한 줄로 Stage A 학습까지 시작할 수 있습니다.
+
+```bash
+bash scripts/runpod_train_stage_a.sh --mode all --role lead --overwrite
+```
+
+주요 옵션:
+
+```bash
+# 데이터셋만 생성
+bash scripts/runpod_train_stage_a.sh --mode prepare --role lead --overwrite
+
+# 학습만 시작 (백그라운드)
+bash scripts/runpod_train_stage_a.sh --mode train --role lead
+
+# 체크포인트 재개
+bash scripts/runpod_train_stage_a.sh \
+  --mode train \
+  --role lead \
+  --resume models/finetuned/pytorch_transformer_roles/lead/checkpoint_epoch_20.pt
+
+# foreground 실행
+bash scripts/runpod_train_stage_a.sh --mode train --role lead --no-nohup
+```
+
+---
+
 ### 옵션 A: PyTorch Music Transformer (완전한 학습 🔥)
 
 **순수 PyTorch로 Music Transformer 처음부터 학습**

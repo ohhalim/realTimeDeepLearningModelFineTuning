@@ -11,6 +11,7 @@ PyTorch Music Transformer 학습 스크립트
 import argparse
 import os
 import sys
+import random
 from pathlib import Path
 
 # Add models directory to path
@@ -106,6 +107,27 @@ def evaluate(model, dataloader, criterion, device):
     return avg_loss, perplexity.item()
 
 
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def apply_overrides(config: dict, args: argparse.Namespace) -> dict:
+    if args.midi_dir:
+        config["data"]["midi_dir"] = args.midi_dir
+    if args.output_dir:
+        config["training"]["output_dir"] = args.output_dir
+    if args.use_role_dataset:
+        config["data"]["use_role_dataset"] = True
+    if args.role:
+        config["data"]["role"] = args.role
+    if args.epochs is not None:
+        config["training"]["epochs"] = args.epochs
+    return config
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="PyTorch Music Transformer 학습"
@@ -122,12 +144,46 @@ def main():
         default=None,
         help="체크포인트에서 재개"
     )
+    parser.add_argument(
+        "--use_role_dataset",
+        action="store_true",
+        help="role-conditioned 데이터셋 모드 사용(data/roles/*)"
+    )
+    parser.add_argument(
+        "--role",
+        type=str,
+        default=None,
+        choices=["lead", "accompaniment", "call_response"],
+        help="학습할 role 이름 (출력 디렉토리 suffix에도 사용)"
+    )
+    parser.add_argument(
+        "--midi_dir",
+        type=str,
+        default=None,
+        help="config.data.midi_dir override"
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="config.training.output_dir override"
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="config.training.epochs override"
+    )
 
     args = parser.parse_args()
 
     # Load config
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
+    config = apply_overrides(config, args)
+
+    seed = config.get("seed", 42)
+    set_seed(seed)
 
     print("=" * 60)
     print("PyTorch Music Transformer 학습")
@@ -148,20 +204,32 @@ def main():
     print("데이터셋 로딩...")
     print("=" * 60)
 
+    use_role_dataset = config["data"].get("use_role_dataset", False)
     dataset = MIDIDataset(
         midi_dir=config['data']['midi_dir'],
         max_length=config['data']['max_length'],
-        augment=config['data'].get('augment', True)
+        augment=config['data'].get('augment', True),
+        use_role_dataset=use_role_dataset,
+        max_conditioning_tokens=config["data"].get("max_conditioning_tokens", 256),
     )
 
+    print(f"Dataset mode: {'role-conditioned' if use_role_dataset else 'raw'}")
+    if config["data"].get("role"):
+        print(f"Role: {config['data']['role']}")
+    print(f"Seed: {seed}")
+
     # Train/Val split
+    if len(dataset) < 2:
+        raise ValueError("Dataset must contain at least 2 samples for train/val split.")
+
     train_size = int(len(dataset) * config['data']['train_split'])
+    train_size = min(max(train_size, 1), len(dataset) - 1)
     val_size = len(dataset) - train_size
 
     train_dataset, val_dataset = random_split(
         dataset,
         [train_size, val_size],
-        generator=torch.Generator().manual_seed(42)
+        generator=torch.Generator().manual_seed(seed)
     )
 
     print(f"Train samples: {len(train_dataset)}")
@@ -173,16 +241,16 @@ def main():
         train_dataset,
         batch_size=config['training']['batch_size'],
         shuffle=True,
-        num_workers=config['training'].get('num_workers', 4),
-        pin_memory=True
+        num_workers=config['training'].get('num_workers', 0),
+        pin_memory=torch.cuda.is_available(),
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=config['training']['batch_size'],
         shuffle=False,
-        num_workers=config['training'].get('num_workers', 4),
-        pin_memory=True
+        num_workers=config['training'].get('num_workers', 0),
+        pin_memory=torch.cuda.is_available(),
     )
 
     # Model
@@ -226,12 +294,12 @@ def main():
 
     if args.resume:
         print(f"Resuming from {args.resume}")
-        checkpoint = torch.load(args.resume)
+        checkpoint = torch.load(args.resume, map_location=device)
         model.load_state_dict(checkpoint['model'])
         optimizer.load_state_dict(checkpoint['optimizer'])
         scheduler.load_state_dict(checkpoint['scheduler'])
         start_epoch = checkpoint['epoch'] + 1
-        best_val_loss = checkpoint.get('best_val_loss', float('inf'))
+        best_val_loss = checkpoint.get('best_val_loss', checkpoint.get('val_loss', float('inf')))
         print(f"Resumed from epoch {start_epoch}")
         print()
 
@@ -241,6 +309,8 @@ def main():
     print("=" * 60)
 
     output_dir = config['training']['output_dir']
+    if use_role_dataset and config["data"].get("role"):
+        output_dir = os.path.join(output_dir, config["data"]["role"])
     os.makedirs(output_dir, exist_ok=True)
 
     for epoch in range(start_epoch, config['training']['epochs']):
@@ -277,6 +347,7 @@ def main():
                 'scheduler': scheduler.state_dict(),
                 'train_loss': train_loss,
                 'val_loss': val_loss,
+                'best_val_loss': best_val_loss,
                 'config': config
             }, checkpoint_path)
 
@@ -294,6 +365,7 @@ def main():
                 'optimizer': optimizer.state_dict(),
                 'scheduler': scheduler.state_dict(),
                 'val_loss': val_loss,
+                'best_val_loss': best_val_loss,
                 'config': config
             }, best_path)
 

@@ -25,6 +25,11 @@ from models.music_transformer import MusicTransformer
 from models.midi_dataset import MIDITokenizer
 
 
+def load_yaml(path: str):
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
 def load_model(checkpoint_path, device='cuda'):
     """
     Load trained model from checkpoint
@@ -79,7 +84,7 @@ def create_primer(tokenizer, primer_type='random', length=32):
             primer.append(tokenizer.note_on_offset + pitch)
 
             # Velocity
-            velocity = torch.randint(40, 80, (1,)).item()
+            velocity = torch.randint(20, 50, (1,)).item()  # token bin (0-63)
             primer.append(tokenizer.velocity_offset + velocity)
 
             # Time shift (8th note)
@@ -126,6 +131,44 @@ def create_primer(tokenizer, primer_type='random', length=32):
     return primer
 
 
+def create_conditioned_primer(
+    tokenizer: MIDITokenizer,
+    conditioning_midi: str,
+    role: str = "lead",
+    tempo_bpm: float = 120.0,
+    max_conditioning_tokens: int = 256,
+):
+    """
+    Build role-conditioned primer:
+    [BOS, ROLE, CHORD_UNKNOWN, TEMPO_*, COND_SEP, conditioning events..., COND_SEP]
+    """
+    if not os.path.exists(conditioning_midi):
+        raise FileNotFoundError(f"conditioning_midi not found: {conditioning_midi}")
+
+    role_token = tokenizer.role_to_token(role)
+    chord_token = tokenizer.chord_to_token(None)
+    tempo_token = tokenizer.tempo_to_token(tempo_bpm)
+    sep_token = tokenizer.control_token("COND_SEP")
+
+    conditioning_tokens = tokenizer.encode_compact(
+        conditioning_midi,
+        max_tokens=max_conditioning_tokens,
+        include_bos=False,
+        include_eos=False,
+    )
+
+    primer = [
+        tokenizer.bos_token,
+        role_token,
+        chord_token,
+        tempo_token,
+        sep_token,
+    ]
+    primer.extend(conditioning_tokens)
+    primer.append(sep_token)
+    return primer
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="PyTorch Music Transformer 음악 생성"
@@ -135,6 +178,12 @@ def main():
         type=str,
         required=True,
         help="모델 체크포인트 경로"
+    )
+    parser.add_argument(
+        "--inference_config",
+        type=str,
+        default=None,
+        help="추론 전용 YAML 설정 파일 (예: configs/inference/realtime_stage_a.yaml)"
     )
     parser.add_argument(
         "--output",
@@ -151,26 +200,32 @@ def main():
     parser.add_argument(
         "--max_length",
         type=int,
-        default=1024,
+        default=None,
         help="최대 생성 길이"
     )
     parser.add_argument(
         "--temperature",
         type=float,
-        default=1.0,
+        default=None,
         help="샘플링 temperature (0.5=보수적, 1.5=창의적)"
     )
     parser.add_argument(
         "--top_k",
         type=int,
-        default=40,
+        default=None,
         help="Top-k 샘플링"
     )
     parser.add_argument(
         "--top_p",
         type=float,
-        default=0.9,
+        default=None,
         help="Nucleus 샘플링"
+    )
+    parser.add_argument(
+        "--context_window",
+        type=int,
+        default=None,
+        help="생성 시 참조할 최근 컨텍스트 토큰 수"
     )
     parser.add_argument(
         "--primer_type",
@@ -180,13 +235,67 @@ def main():
         help="Primer 타입"
     )
     parser.add_argument(
+        "--conditioning_midi",
+        type=str,
+        default=None,
+        help="Role-conditioned primer로 사용할 MIDI 파일"
+    )
+    parser.add_argument(
+        "--role",
+        type=str,
+        default="lead",
+        choices=["lead", "accompaniment", "call_response"],
+        help="role-conditioned 생성에서 사용할 role"
+    )
+    parser.add_argument(
+        "--conditioning_tempo",
+        type=float,
+        default=None,
+        help="role-conditioned primer tempo metadata"
+    )
+    parser.add_argument(
+        "--max_conditioning_tokens",
+        type=int,
+        default=None,
+        help="conditioning MIDI에서 사용할 최대 토큰 수"
+    )
+    parser.add_argument(
+        "--include_primer_in_output",
+        action="store_true",
+        help="출력 MIDI에 primer 구간도 포함"
+    )
+    parser.add_argument(
         "--tempo",
         type=int,
-        default=120,
+        default=None,
         help="MIDI 템포 (BPM)"
     )
 
     args = parser.parse_args()
+
+    infer_cfg = {}
+    if args.inference_config:
+        infer_cfg = load_yaml(args.inference_config)
+        print(f"Inference config loaded: {args.inference_config}")
+
+    generation_cfg = infer_cfg.get("generation", {})
+
+    max_length = args.max_length if args.max_length is not None else int(generation_cfg.get("max_length", 1024))
+    temperature = args.temperature if args.temperature is not None else float(generation_cfg.get("temperature", 1.0))
+    top_k = args.top_k if args.top_k is not None else int(generation_cfg.get("top_k", 40))
+    top_p = args.top_p if args.top_p is not None else float(generation_cfg.get("top_p", 0.9))
+    context_window = args.context_window if args.context_window is not None else int(generation_cfg.get("context_window", 256))
+    max_conditioning_tokens = (
+        args.max_conditioning_tokens
+        if args.max_conditioning_tokens is not None
+        else int(generation_cfg.get("max_conditioning_tokens", 256))
+    )
+    conditioning_tempo = (
+        args.conditioning_tempo
+        if args.conditioning_tempo is not None
+        else float(generation_cfg.get("conditioning_tempo", 120.0))
+    )
+    midi_tempo = args.tempo if args.tempo is not None else int(generation_cfg.get("midi_tempo", 120))
 
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -208,19 +317,41 @@ def main():
         print("=" * 60)
 
         # Create primer
-        primer = create_primer(tokenizer, args.primer_type)
+        if args.conditioning_midi:
+            primer = create_conditioned_primer(
+                tokenizer=tokenizer,
+                conditioning_midi=args.conditioning_midi,
+                role=args.role,
+                tempo_bpm=conditioning_tempo,
+                max_conditioning_tokens=max_conditioning_tokens,
+            )
+            print(f"Primer mode: role-conditioned ({args.role})")
+            print(f"Conditioning MIDI: {args.conditioning_midi}")
+        else:
+            primer = create_primer(tokenizer, args.primer_type)
+            print(f"Primer mode: {args.primer_type}")
+
+        if len(primer) >= max_length:
+            print(
+                f"Warning: primer 길이({len(primer)})가 max_length({max_length}) 이상입니다. "
+                "primer를 잘라서 사용합니다."
+            )
+            primer = primer[: max(8, max_length // 2)]
+
         print(f"Primer length: {len(primer)} tokens")
-        print(f"Primer type: {args.primer_type}")
 
         # Generate
         print("생성 중...")
         generated = model.generate(
             primer=primer,
-            max_length=args.max_length,
-            temperature=args.temperature,
-            top_k=args.top_k,
-            top_p=args.top_p,
-            device=device
+            max_length=max_length,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            device=device,
+            stop_at_eos=True,
+            context_window=context_window,
+            eos_token_id=tokenizer.eos_token,
         )
 
         print(f"✓ 생성 완료: {len(generated)} 토큰")
@@ -231,7 +362,16 @@ def main():
         else:
             output_path = args.output
 
-        tokenizer.decode(generated.tolist(), output_path, args.tempo)
+        generated_list = generated.tolist()
+        if args.include_primer_in_output:
+            decode_tokens = generated_list
+        else:
+            continuation_tokens = generated_list[len(primer):]
+            decode_tokens = [tokenizer.bos_token] + continuation_tokens
+            if not continuation_tokens:
+                decode_tokens = generated_list
+
+        tokenizer.decode(decode_tokens, output_path, midi_tempo)
 
         print(f"✓ MIDI 저장: {output_path}")
         print()

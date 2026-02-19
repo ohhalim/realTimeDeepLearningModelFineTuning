@@ -245,7 +245,10 @@ class MusicTransformer(nn.Module):
         temperature=1.0,
         top_k=40,
         top_p=0.9,
-        device='cuda'
+        device='cuda',
+        stop_at_eos=True,
+        context_window=None,
+        eos_token_id=None,
     ):
         """
         Auto-regressive generation
@@ -271,13 +274,19 @@ class MusicTransformer(nn.Module):
 
         with torch.no_grad():
             for _ in range(max_length - len(primer)):
+                if context_window is not None and context_window > 0:
+                    model_input = generated[:, -context_window:]
+                else:
+                    model_input = generated
+
                 # Get predictions
-                logits = self.forward(generated)
+                logits = self.forward(model_input)
                 logits = logits[:, -1, :] / temperature
 
                 # Top-k filtering
                 if top_k > 0:
-                    indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
+                    top_k_cur = min(top_k, logits.size(-1))
+                    indices_to_remove = logits < torch.topk(logits, top_k_cur)[0][..., -1, None]
                     logits[indices_to_remove] = float('-inf')
 
                 # Top-p (nucleus) filtering
@@ -300,6 +309,9 @@ class MusicTransformer(nn.Module):
 
                 # Append to sequence
                 generated = torch.cat([generated, next_token], dim=1)
+
+                if stop_at_eos and eos_token_id is not None and next_token.item() == eos_token_id:
+                    break
 
         return generated.squeeze(0).cpu().numpy()
 

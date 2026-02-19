@@ -1,0 +1,28 @@
+# Stage A inference-only configuration
+# Keep this separate from training configs to avoid max_length drift.
+
+model:
+  role: "lead"
+  checkpoint: "models/finetuned/pytorch_transformer_roles/lead/best_model.pt"
+
+generation:
+  max_length: 512
+  context_window: 256
+  temperature: 0.9
+  top_k: 40
+  top_p: 0.9
+  max_conditioning_tokens: 256
+
+scheduler:
+  target_horizon_bars: 1
+  max_horizon_bars: 2
+  min_output_horizon_ms: 250
+  min_output_notes: 8
+  chord_buffer_ms: 100
+  dead_air_threshold_ms: 180
+  max_inference_step_ms: 60
+
+fallback:
+  enabled: true
+  policy: "phrase_retriever"
+  prebuffer_notes: 16
